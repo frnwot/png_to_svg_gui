@@ -1,60 +1,113 @@
-# just private stuff to ignore fucking paid platform
+# i wanna free code without fuking pay
 name: PNG to SVG Converter
 
 on:
   workflow_dispatch:
     inputs:
       png_url:
-        description: 'Direct PNG Image URL'
+        description: 'Direct URL of PNG image to convert'
         required: true
+        type: string
+      threshold:
+        description: 'Threshold sensitivity (0-255, lower=more details)'
+        required: false
+        default: 'auto'
+        type: string
+      scale:
+        description: 'Output scale (1-10)'
+        required: false
+        default: '5'
         type: string
 
 jobs:
   convert:
     runs-on: ubuntu-latest
-    name: Convert PNG to SVG and print code
     steps:
-      - name: ⬇️ Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 📥 Install dependencies
+      - name: 🛠️ Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y python3-pip python3-opencv
-          pip install pillow numpy svgwrite
+          sudo apt-get update
+          sudo apt-get install -y potrace
+          pip install pillow numpy pypotrace scikit-image
 
-      - name: 📦 Download PNG from URL
+      - name: 📥 Download PNG
         run: |
-          curl -L "${{ github.event.inputs.png_url }}" -o input.png
-          echo "✅ PNG downloaded as input.png"
+          curl -L "${{ github.event.inputs.png_url }}" -o /tmp/input.png
+          echo "Image downloaded to /tmp/input.png"
 
-      - name: 🧠 Convert PNG to SVG
+      - name: 🖼️ Convert to SVG Path
         run: |
-          python3 <<'EOF'
+          python3 <<EOF
+          import os
           from PIL import Image
           import numpy as np
-          import cv2
-          import svgwrite
+          import potrace
+          from skimage import color, filters
+          import io
+          import math
 
-          image = Image.open("input.png").convert("RGBA").resize((256, 256))
-          image_np = np.array(image)
-          image_rgb = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
-          gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
-          _, thresh = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY)
-          contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+          # Configuration
+          MAX_SIZE = 300
+          SCALE = float("${{ github.event.inputs.scale }}")
+          THRESH = "${{ github.event.inputs.threshold }}"
 
-          dwg = svgwrite.Drawing(size=("256", "256"))
-          for cnt in contours:
-              path_data = "M " + " L ".join(f"{pt[0][0]},{pt[0][1]}" for pt in cnt) + " Z"
-              dwg.add(dwg.path(d=path_data, fill="#000000"))
+          # Load image
+          with open('/tmp/input.png', 'rb') as f:
+              img = Image.open(io.BytesIO(f.read())).convert('RGBA')
+          
+          # Resize while maintaining aspect ratio
+          ratio = min(MAX_SIZE/img.width, MAX_SIZE/img.height)
+          new_size = (int(img.width*ratio), int(img.height*ratio))
+          img = img.resize(new_size, Image.LANCZOS)
 
-          dwg.saveas("output.svg")
+          # Convert to grayscale and threshold
+          img_gray = color.rgb2gray(np.array(img))
+          
+          if THRESH.lower() == 'auto':
+              thresh = filters.threshold_otsu(img_gray)
+          else:
+              thresh = float(THRESH)/255.0
+          
+          bw = (img_gray > thresh).astype(np.uint8) * 255
 
-          print("\n✅ SVG Code:\n")
-          with open("output.svg", "r") as f:
-              print(f.read())
+          # Trace the bitmap
+          bmp = potrace.Bitmap(bw)
+          path = bmp.trace(
+              turdsize=2,
+              turnpolicy=potrace.TURNPOLICY_MINORITY,
+              alphamax=1,
+              opticurve=True,
+              opttolerance=0.2
+          )
+
+          # Generate SVG path data
+          paths = []
+          for curve in path:
+              segments = []
+              segments.append(f"M {curve.start_point.x * SCALE},{curve.start_point.y * SCALE}")
+              
+              for segment in curve:
+                  if segment.is_corner:
+                      segments.append(f"L {segment.c.x * SCALE},{segment.c.y * SCALE}")
+                      segments.append(f"L {segment.end_point.x * SCALE},{segment.end_point.y * SCALE}")
+                  else:
+                      segments.append(f"C {segment.c1.x * SCALE},{segment.c1.y * SCALE} {segment.c2.x * SCALE},{segment.c2.y * SCALE} {segment.end_point.x * SCALE},{segment.end_point.y * SCALE}")
+              
+              paths.append(" ".join(segments))
+
+          # Print results to console
+          print("\n" + "="*50)
+          print("SVG PATH DATA:")
+          print(f'<path d="{" ".join(paths)}" fill="black"/>')
+          
+          print("\nFULL SVG TEMPLATE:")
+          print(f'''<svg xmlns="http://www.w3.org/2000/svg" 
+          width="{new_size[0] * SCALE}" 
+          height="{new_size[1] * SCALE}" 
+          viewBox="0 0 {new_size[0] * SCALE} {new_size[1] * SCALE}">
+          <path d="{" ".join(paths)}" fill="black"/>
+          </svg>''')
+          print("="*50 + "\n")
           EOF
 
-      - name: ✅ Done!
-        run: echo "🎉 PNG to SVG conversion complete!"
-        
+      - name: 🎉 Complete
+        run: echo "Conversion finished! Check logs above for SVG output."
