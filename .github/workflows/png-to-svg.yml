@@ -23,11 +23,16 @@ jobs:
   convert:
     runs-on: ubuntu-latest
     steps:
-      - name: 🛠️ Install dependencies
+      - name: 🛠️ Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y potrace
-          pip install pillow numpy pypotrace scikit-image
+          sudo apt-get install -y \
+            potrace \
+            build-essential \
+            python3-dev \
+            libagg-dev \
+            libpotrace-dev
+          pip install --upgrade pip setuptools wheel
 
       - name: 📥 Download PNG
         run: |
@@ -40,10 +45,10 @@ jobs:
           import os
           from PIL import Image
           import numpy as np
-          import potrace
           from skimage import color, filters
           import io
           import math
+          import subprocess
 
           # Configuration
           MAX_SIZE = 300
@@ -68,45 +73,38 @@ jobs:
               thresh = float(THRESH)/255.0
           
           bw = (img_gray > thresh).astype(np.uint8) * 255
+          Image.fromarray(bw).save('/tmp/bw.png')
 
-          # Trace the bitmap
-          bmp = potrace.Bitmap(bw)
-          path = bmp.trace(
-              turdsize=2,
-              turnpolicy=potrace.TURNPOLICY_MINORITY,
-              alphamax=1,
-              opticurve=True,
-              opttolerance=0.2
-          )
+          # Use potrace CLI directly
+          subprocess.run([
+              'potrace',
+              '/tmp/bw.png',
+              '-b', 'svg',
+              '-o', '/tmp/output.svg',
+              '--scale', str(SCALE),
+              '--tight',
+              '--opttolerance', '0.2'
+          ])
 
-          # Generate SVG path data
-          paths = []
-          for curve in path:
-              segments = []
-              segments.append(f"M {curve.start_point.x * SCALE},{curve.start_point.y * SCALE}")
+          # Read and print results
+          with open('/tmp/output.svg', 'r') as f:
+              svg_content = f.read()
+              path_start = svg_content.find('d="') + 3
+              path_end = svg_content.find('"', path_start)
+              path_data = svg_content[path_start:path_end]
+
+              print("\n" + "="*50)
+              print("SVG PATH DATA:")
+              print(f'<path d="{path_data}" fill="black"/>')
               
-              for segment in curve:
-                  if segment.is_corner:
-                      segments.append(f"L {segment.c.x * SCALE},{segment.c.y * SCALE}")
-                      segments.append(f"L {segment.end_point.x * SCALE},{segment.end_point.y * SCALE}")
-                  else:
-                      segments.append(f"C {segment.c1.x * SCALE},{segment.c1.y * SCALE} {segment.c2.x * SCALE},{segment.c2.y * SCALE} {segment.end_point.x * SCALE},{segment.end_point.y * SCALE}")
-              
-              paths.append(" ".join(segments))
-
-          # Print results to console
-          print("\n" + "="*50)
-          print("SVG PATH DATA:")
-          print(f'<path d="{" ".join(paths)}" fill="black"/>')
-          
-          print("\nFULL SVG TEMPLATE:")
-          print(f'''<svg xmlns="http://www.w3.org/2000/svg" 
-          width="{new_size[0] * SCALE}" 
-          height="{new_size[1] * SCALE}" 
-          viewBox="0 0 {new_size[0] * SCALE} {new_size[1] * SCALE}">
-          <path d="{" ".join(paths)}" fill="black"/>
-          </svg>''')
-          print("="*50 + "\n")
+              print("\nFULL SVG TEMPLATE:")
+              print(f'''<svg xmlns="http://www.w3.org/2000/svg" 
+              width="{new_size[0] * SCALE}" 
+              height="{new_size[1] * SCALE}" 
+              viewBox="0 0 {new_size[0] * SCALE} {new_size[1] * SCALE}">
+              <path d="{path_data}" fill="black"/>
+              </svg>''')
+              print("="*50 + "\n")
           EOF
 
       - name: 🎉 Complete
