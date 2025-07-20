@@ -33,6 +33,7 @@ jobs:
             libagg-dev \
             libpotrace-dev
           pip install --upgrade pip setuptools wheel
+          pip install pillow numpy scikit-image
 
       - name: 📥 Download PNG
         run: |
@@ -56,55 +57,60 @@ jobs:
           THRESH = "${{ github.event.inputs.threshold }}"
 
           # Load image
-          with open('/tmp/input.png', 'rb') as f:
-              img = Image.open(io.BytesIO(f.read())).convert('RGBA')
-          
-          # Resize while maintaining aspect ratio
-          ratio = min(MAX_SIZE/img.width, MAX_SIZE/img.height)
-          new_size = (int(img.width*ratio), int(img.height*ratio))
-          img = img.resize(new_size, Image.LANCZOS)
-
-          # Convert to grayscale and threshold
-          img_gray = color.rgb2gray(np.array(img))
-          
-          if THRESH.lower() == 'auto':
-              thresh = filters.threshold_otsu(img_gray)
-          else:
-              thresh = float(THRESH)/255.0
-          
-          bw = (img_gray > thresh).astype(np.uint8) * 255
-          Image.fromarray(bw).save('/tmp/bw.png')
-
-          # Use potrace CLI directly
-          subprocess.run([
-              'potrace',
-              '/tmp/bw.png',
-              '-b', 'svg',
-              '-o', '/tmp/output.svg',
-              '--scale', str(SCALE),
-              '--tight',
-              '--opttolerance', '0.2'
-          ])
-
-          # Read and print results
-          with open('/tmp/output.svg', 'r') as f:
-              svg_content = f.read()
-              path_start = svg_content.find('d="') + 3
-              path_end = svg_content.find('"', path_start)
-              path_data = svg_content[path_start:path_end]
-
-              print("\n" + "="*50)
-              print("SVG PATH DATA:")
-              print(f'<path d="{path_data}" fill="black"/>')
+          try:
+              with open('/tmp/input.png', 'rb') as f:
+                  img = Image.open(io.BytesIO(f.read())).convert('RGBA')
               
-              print("\nFULL SVG TEMPLATE:")
-              print(f'''<svg xmlns="http://www.w3.org/2000/svg" 
-              width="{new_size[0] * SCALE}" 
-              height="{new_size[1] * SCALE}" 
-              viewBox="0 0 {new_size[0] * SCALE} {new_size[1] * SCALE}">
-              <path d="{path_data}" fill="black"/>
-              </svg>''')
-              print("="*50 + "\n")
+              # Resize while maintaining aspect ratio
+              ratio = min(MAX_SIZE/img.width, MAX_SIZE/img.height)
+              new_size = (int(img.width*ratio), (int(img.height*ratio))
+              img = img.resize(new_size, Image.LANCZOS)
+
+              # Convert to grayscale and threshold
+              img_gray = color.rgb2gray(np.array(img))
+              
+              if THRESH.lower() == 'auto':
+                  thresh = filters.threshold_otsu(img_gray)
+              else:
+                  thresh = float(THRESH)/255.0
+              
+              bw = (img_gray > thresh).astype(np.uint8) * 255
+              Image.fromarray(bw).save('/tmp/bw.png')
+
+              # Use potrace CLI directly
+              subprocess.run([
+                  'potrace',
+                  '/tmp/bw.png',
+                  '-b', 'svg',
+                  '-o', '/tmp/output.svg',
+                  '--scale', str(SCALE),
+                  '--tight',
+                  '--opttolerance', '0.2'
+              ], check=True)
+
+              # Read and print results
+              with open('/tmp/output.svg', 'r') as f:
+                  svg_content = f.read()
+                  path_start = svg_content.find('d="') + 3
+                  path_end = svg_content.find('"', path_start)
+                  path_data = svg_content[path_start:path_end]
+
+                  print("\n" + "="*50)
+                  print("SVG PATH DATA:")
+                  print(f'<path d="{path_data}" fill="black"/>')
+                  
+                  print("\nFULL SVG TEMPLATE:")
+                  print(f'''<svg xmlns="http://www.w3.org/2000/svg" 
+                  width="{new_size[0] * SCALE}" 
+                  height="{new_size[1] * SCALE}" 
+                  viewBox="0 0 {new_size[0] * SCALE} {new_size[1] * SCALE}">
+                  <path d="{path_data}" fill="black"/>
+                  </svg>''')
+                  print("="*50 + "\n")
+
+          except Exception as e:
+              print(f"ERROR: {str(e)}")
+              raise
           EOF
 
       - name: 🎉 Complete
