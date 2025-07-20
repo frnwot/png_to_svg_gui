@@ -1,0 +1,60 @@
+# just private stuff to ignore fucking paid platform
+name: PNG to SVG Converter
+
+on:
+  workflow_dispatch:
+    inputs:
+      png_url:
+        description: 'Direct PNG Image URL'
+        required: true
+        type: string
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    name: Convert PNG to SVG and print code
+    steps:
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📥 Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y python3-pip python3-opencv
+          pip install pillow numpy svgwrite
+
+      - name: 📦 Download PNG from URL
+        run: |
+          curl -L "${{ github.event.inputs.png_url }}" -o input.png
+          echo "✅ PNG downloaded as input.png"
+
+      - name: 🧠 Convert PNG to SVG
+        run: |
+          python3 <<'EOF'
+          from PIL import Image
+          import numpy as np
+          import cv2
+          import svgwrite
+
+          image = Image.open("input.png").convert("RGBA").resize((256, 256))
+          image_np = np.array(image)
+          image_rgb = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
+          gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+          _, thresh = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY)
+          contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+          dwg = svgwrite.Drawing(size=("256", "256"))
+          for cnt in contours:
+              path_data = "M " + " L ".join(f"{pt[0][0]},{pt[0][1]}" for pt in cnt) + " Z"
+              dwg.add(dwg.path(d=path_data, fill="#000000"))
+
+          dwg.saveas("output.svg")
+
+          print("\n✅ SVG Code:\n")
+          with open("output.svg", "r") as f:
+              print(f.read())
+          EOF
+
+      - name: ✅ Done!
+        run: echo "🎉 PNG to SVG conversion complete!"
+        
